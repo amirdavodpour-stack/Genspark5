@@ -1,0 +1,86 @@
+name: Build Test APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find ZIP
+        shell: bash
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP file found in repository root."
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extract project
+        shell: bash
+        run: |
+          mkdir -p extracted
+          unzip -o "$ZIP_FILE" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 3 -type f | head -100
+
+      - name: Find Flutter project
+        shell: bash
+        run: |
+          PUBSPEC=$(find extracted -name pubspec.yaml -type f | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "pubspec.yaml not found."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter project: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Get dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Build test APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter build apk --release \
+            --dart-define=BUILD_PROFILE=pilot \
+            --dart-define=API_BASE_URL=https://api.hope.example.invalid/api/v1
+
+      - name: Find APK
+        shell: bash
+        run: |
+          APK=$(find "$PROJECT_DIR/build/app/outputs/apk/release" -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK not found."
+            exit 1
+          fi
+
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOPE-test-apk
+          path: ${{ env.APK }}
